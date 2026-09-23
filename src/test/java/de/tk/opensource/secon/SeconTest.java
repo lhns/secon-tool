@@ -20,12 +20,7 @@
  */
 package de.tk.opensource.secon;
 
-import global.namespace.fun.io.api.Sink;
-import global.namespace.fun.io.api.Source;
-import global.namespace.fun.io.api.Store;
 
-import java.io.InputStream;
-import java.io.OutputStream;
 import java.security.KeyStore;
 import java.security.cert.X509Certificate;
 import java.util.concurrent.Callable;
@@ -39,7 +34,6 @@ import de.tk.opensource.secon.Identity;
 import de.tk.opensource.secon.Subscriber;
 
 import static de.tk.opensource.secon.SECON.*;
-import static global.namespace.fun.io.bios.BIOS.*;
 import static java.util.Objects.requireNonNull;
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -95,32 +89,26 @@ public class SeconTest {
 		final Subscriber senderSub = subscriber(senderId, directory);
 		final Subscriber recipientSub = subscriber(recipientId, directory);
 		final X509Certificate recipientCert = recipientId.certificate();
-		final Store plain = memory(), cipher = memory(), clone = memory();
+		final MemoryStore plain = new MemoryStore(), cipher = new MemoryStore(), clone = new MemoryStore();
 		plain.content("Hello world!".getBytes());
-		copy(input(plain), senderSub.signAndEncryptTo(output(cipher), recipientCert));
+		copy(plain.input(), senderSub.signAndEncryptTo(cipher.output(), recipientCert));
 
         // Simulate certificate verification failure:
         {
             final CertificateVerificationException e = new CertificateVerificationException("invalid certificate");
             assertSame(e, assertThrows(SeconException.class, () -> copy(
-                    recipientSub.decryptAndVerifyFrom(input(cipher), certs -> {
+                    recipientSub.decryptAndVerifyFrom(cipher.input(), certs -> {
                         throw e;
                     }),
-                    output(clone)
+                    clone.output()
             )));
         }
 
-		copy(recipientSub.decryptAndVerifyFrom(input(cipher)), output(clone));
+		copy(recipientSub.decryptAndVerifyFrom(cipher.input()), clone.output());
 		assertArrayEquals(plain.content(), clone.content());
 	}
 
-	private static Callable<InputStream> input(Source source) {
-		return callable(source.input());
-	}
 
-	private static Callable<OutputStream> output(Sink sink) {
-		return callable(sink.output());
-	}
 
 	@Test
 	void bobToAliceUsingRSASSA_RSS_256_BadEncAlgo() throws Exception {
@@ -134,12 +122,12 @@ public class SeconTest {
 		
 		final Subscriber recipientSub = subscriber(recipientId, directory);
 		final X509Certificate recipientCert = recipientId.certificate();
-		final Store plain = memory(), cipher = memory(), clone = memory();
+		final MemoryStore plain = new MemoryStore(), cipher = new MemoryStore(), clone = new MemoryStore();
 		plain.content("Hello world!".getBytes());
-		copy(input(plain), senderSub.signAndEncryptTo(output(cipher), recipientCert));
+		copy(plain.input(), senderSub.signAndEncryptTo(cipher.output(), recipientCert));
 		
 		assertThrows(EncryptionAlgorithmIllegalException.class, () -> {
-			copy(recipientSub.decryptAndVerifyFrom(input(cipher)), output(clone));
+			copy(recipientSub.decryptAndVerifyFrom(cipher.input()), clone.output());
 		});
 	}
 }

@@ -1,23 +1,17 @@
 package de.tk.opensource.secon;
 
-import global.namespace.fun.io.api.Sink;
-import global.namespace.fun.io.api.Source;
-import global.namespace.fun.io.api.Store;
 
 import org.bouncycastle.cms.*;
 import org.bouncycastle.cms.jcajce.JceCMSContentEncryptorBuilder;
 import org.bouncycastle.cms.jcajce.JceKeyTransRecipientInfoGenerator;
 import org.junit.jupiter.api.Test;
 
-import java.io.InputStream;
-import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
 import java.security.KeyStore;
 import java.security.cert.X509Certificate;
 import java.util.concurrent.Callable;
 
 import static de.tk.opensource.secon.SECON.*;
-import static global.namespace.fun.io.bios.BIOS.memory;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 public class SignatureVerificationTest {
@@ -33,11 +27,11 @@ public class SignatureVerificationTest {
         // create message with empty signature
         byte[] encryptedMessageWithEmptySignature = encrypt(recipientId.certificate(), emptySignature("unsigned message"));
 
-        Store cipher = memory();
-        Store clone = memory();
+        MemoryStore cipher = new MemoryStore();
+        MemoryStore clone = new MemoryStore();
         cipher.content(encryptedMessageWithEmptySignature);
 
-        assertThrows(SeconException.class, () -> copy(recipient.decryptAndVerifyFrom(input(cipher)), output(clone)));
+        assertThrows(SeconException.class, () -> copy(recipient.decryptAndVerifyFrom(cipher.input()), clone.output()));
     }
 
     private static byte[] emptySignature(String message) throws Exception {
@@ -51,10 +45,6 @@ public class SignatureVerificationTest {
         return gen.generate(new CMSProcessableByteArray(payload), new JceCMSContentEncryptorBuilder(CMSAlgorithm.AES256_CBC).setProvider("BC").build()).getEncoded();
     }
 
-    private static Callable<InputStream> input(Source source) {return callable(source.input());}
 
-    private static Callable<OutputStream> output(Sink sink) {
-        return callable(sink.output());
-    }
 
 }

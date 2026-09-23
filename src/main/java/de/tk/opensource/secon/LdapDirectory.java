@@ -20,15 +20,23 @@
  */
 package de.tk.opensource.secon;
 
+import javax.naming.NameNotFoundException;
+import javax.naming.NamingEnumeration;
+import javax.naming.directory.Attribute;
+import javax.naming.directory.DirContext;
+import javax.naming.directory.SearchControls;
+import javax.naming.directory.SearchResult;
 import java.io.ByteArrayInputStream;
 import java.security.cert.CertificateException;
 import java.security.cert.CertificateFactory;
 import java.security.cert.X509CertSelector;
 import java.security.cert.X509Certificate;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.Callable;
 
 import static javax.naming.directory.SearchControls.OBJECT_SCOPE;
 import static javax.naming.directory.SearchControls.ONELEVEL_SCOPE;
@@ -44,9 +52,9 @@ final class LdapDirectory implements Directory {
 
     private volatile CertificateFactory certificateFactory;
 
-    private final DirContextPool pool;
+    private final Callable<DirContext> pool;
 
-    LdapDirectory(final DirContextPool pool) {
+    LdapDirectory(final Callable<DirContext> pool) {
         this.pool = pool;
     }
 
@@ -54,14 +62,15 @@ final class LdapDirectory implements Directory {
     public Optional<X509Certificate> certificate(final X509CertSelector selector) throws Exception {
         final String base = String.format("cn=%06X,%s", selector.getSerialNumber(), selector.getIssuerAsString());
         final List<X509Certificate> result = new ArrayList<>();
-        pool.accept(visitor -> {
-            for (byte[] bytes : visitor.search(base, "objectClass=pkiUser", OBJECT_SCOPE, byte[].class, "userCertificate;binary")) {
+        final DirContext context = pool.call();
+        try (AutoCloseable closeContext = context::close) {
+            for (byte[] bytes : search(context, base, "objectClass=pkiUser", OBJECT_SCOPE, byte[].class, "userCertificate;binary")) {
                 final X509Certificate cert = certificate(bytes);
                 if (selector.match(cert)) {
                     result.add(cert);
                 }
             }
-        });
+        }
         return result.stream().max(CERTIFICATE_COMPARATOR);
     }
 
@@ -71,19 +80,56 @@ final class LdapDirectory implements Directory {
                 ? "ou=IK" + identifier + ",o=LE,c=DE"
                 : "ou=BN" + identifier + ",o=AG,c=DE";
         final List<X509Certificate> result = new ArrayList<>();
-        pool.accept(visitor -> {
-            for (final String dn : visitor.search(base, "objectClass=*", ONELEVEL_SCOPE, String.class, "seeAlso")) {
-                for (byte[] bytes : visitor.search(dn, "objectClass=pkiUser", OBJECT_SCOPE, byte[].class, "userCertificate;binary")) {
+        final DirContext context = pool.call();
+        try (AutoCloseable closeContext = context::close) {
+            for (final String dn : search(context, base, "objectClass=*", ONELEVEL_SCOPE, String.class, "seeAlso")) {
+                for (byte[] bytes : search(context, dn, "objectClass=pkiUser", OBJECT_SCOPE, byte[].class, "userCertificate;binary")) {
                     result.add(certificate(bytes));
                 }
             }
 /* Faster alternative for IKs, but doesn't work with all LDAP variants:
-            for (byte[] bytes : visitor.<byte[]>search("c=de", "sn=IK" + identifier, "userCertificate;binary")) {
-                result.add(parseCertificate(bytes));
+            for (byte[] bytes : search(context, "c=de", "sn=IK" + identifier, ONELEVEL_SCOPE, byte[].class, "userCertificate;binary")) {
+                result.add(certificate(bytes));
             }
 */
-        });
+        }
         return result.stream().max(CERTIFICATE_COMPARATOR);
+    }
+
+    /**
+     * Sucht Einträge unterhalb von {@code base} und gibt die Werte aller angefragten Attribute zurück.
+     * Existiert {@code base} nicht, so ist das Ergebnis leer.
+     */
+    private static <T> List<T> search(
+            final DirContext context,
+            final String base,
+            final String filter,
+            final int scope,
+            final Class<T> type,
+            final String... attrs
+    ) throws Exception {
+        final SearchControls controls = new SearchControls();
+        controls.setSearchScope(scope);
+        controls.setReturningAttributes(attrs);
+        final List<T> result = new ArrayList<>();
+        final NamingEnumeration<SearchResult> results;
+        try {
+            results = context.search(base, filter, controls);
+        } catch (NameNotFoundException ignored) {
+            return result;
+        }
+        try (AutoCloseable closeResults = results::close) {
+            // Only the search results are streamed from the server - the attributes and their values of each result
+            // are already in memory, so plain enumeration is sufficient for them.
+            while (results.hasMore()) {
+                for (final Attribute attr : Collections.list(results.next().getAttributes().getAll())) {
+                    for (final Object value : Collections.list(attr.getAll())) {
+                        result.add(type.cast(value));
+                    }
+                }
+            }
+        }
+        return result;
     }
 
     private X509Certificate certificate(byte[] bytes) throws CertificateException {

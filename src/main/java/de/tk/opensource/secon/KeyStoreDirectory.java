@@ -25,9 +25,10 @@ import java.security.KeyStoreException;
 import java.security.cert.Certificate;
 import java.security.cert.X509CertSelector;
 import java.security.cert.X509Certificate;
+import java.util.ArrayList;
 import java.util.Collections;
+import java.util.List;
 import java.util.Optional;
-import java.util.stream.Stream;
 
 /**
  * @author Wolfgang Schmiesing
@@ -50,11 +51,18 @@ final class KeyStoreDirectory implements Directory {
 
 	@Override
 	public final Optional<X509Certificate> certificate(X509CertSelector selector) throws KeyStoreException {
-		return certificates(selector).findFirst();
+		return certificates(selector).stream().findFirst();
 	}
 
-	private final Stream<X509Certificate> certificates(X509CertSelector selector) throws KeyStoreException {
-		return Collections.list(ks.aliases()).stream().flatMap(this::certificateStream).filter(selector::match);
+	private List<X509Certificate> certificates(X509CertSelector selector) throws KeyStoreException {
+		final List<X509Certificate> result = new ArrayList<>();
+		for (final String alias : Collections.list(ks.aliases())) {
+			final Optional<X509Certificate> cert = certificate(alias);
+			if (cert.isPresent() && selector.match(cert.get())) {
+				result.add(cert.get());
+			}
+		}
+		return result;
 	}
 
 	@Override
@@ -67,7 +75,7 @@ final class KeyStoreDirectory implements Directory {
 		selector.setSubject(cert.getIssuerX500Principal());
 
 		// find first matching issuer since principal might not be unique
-		Optional<X509Certificate> issuer = certificates(selector)
+		Optional<X509Certificate> issuer = certificates(selector).stream()
                 .filter(Certificates::isCA)
                 .filter(i -> Certificates.signedBy(cert, i))
                 .findFirst();
@@ -75,14 +83,6 @@ final class KeyStoreDirectory implements Directory {
 		return issuer;
 	}
 
-
-    private Stream<X509Certificate> certificateStream(final String alias) {
-		try {
-			return certificate(alias).map(Stream::of).orElseGet(Stream::empty);
-		} catch (KeyStoreException e) {
-			throw new IllegalStateException("Cannot get certificate for alias `" + alias + "`:", e);
-		}
-	}
 
 	@Override
 	public final Optional<X509Certificate> certificate(final String identifier) throws KeyStoreException {

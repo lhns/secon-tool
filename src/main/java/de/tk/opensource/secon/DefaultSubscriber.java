@@ -20,8 +20,6 @@
  */
 package de.tk.opensource.secon;
 
-import global.namespace.fun.io.api.Socket;
-import global.namespace.fun.io.api.function.XFunction;
 import org.bouncycastle.asn1.ASN1ObjectIdentifier;
 import org.bouncycastle.asn1.pkcs.PKCSObjectIdentifiers;
 import org.bouncycastle.asn1.x500.X500Name;
@@ -45,7 +43,9 @@ import org.bouncycastle.operator.jcajce.JcaDigestCalculatorProviderBuilder;
 
 import javax.security.auth.x500.X500Principal;
 import java.io.BufferedInputStream;
+import java.io.Closeable;
 import java.io.FilterInputStream;
+import java.io.FilterOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
@@ -54,13 +54,13 @@ import java.security.PrivateKey;
 import java.security.cert.X509CertSelector;
 import java.security.cert.X509Certificate;
 import java.security.spec.PSSParameterSpec;
-import java.util.Arrays;
+import java.util.ArrayList;
 import java.util.Collection;
+import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.Callable;
 
 import static de.tk.opensource.secon.SECON.callable;
-import static de.tk.opensource.secon.SECON.socket;
 import static java.util.Objects.nonNull;
 import static java.util.Objects.requireNonNull;
 import static org.bouncycastle.jce.provider.BouncyCastleProvider.PROVIDER_NAME;
@@ -154,8 +154,6 @@ final class DefaultSubscriber implements Subscriber {
 		return gen.open(out, true);
 	}
 
-	private final XFunction<OutputStream, OutputStream> sign = Streams.fixOutputstreamClose(this::sign);
-
 	private InputStream verify(final InputStream in, final Verifier verifier) throws Exception {
 		final CMSSignedDataParser parser =
 			new CMSSignedDataParser(
@@ -169,7 +167,8 @@ final class DefaultSubscriber implements Subscriber {
 
 				@Override
 				public void close() throws IOException {
-					SideEffect.runAll(signedContent::drain, this::verifyIo);
+					signedContent.drain();
+					verifyIo();
 				}
 
 				@SuppressWarnings("unchecked")
@@ -192,24 +191,16 @@ final class DefaultSubscriber implements Subscriber {
 			};
 	}
 
-	private XFunction<InputStream, InputStream> verify(Verifier v) {
-		return Streams.fixInputstreamClose(in -> verify(in, v));
-	}
-
-	private OutputStream encrypt(final OutputStream out, final Callable<X509Certificate>[] recipients)
-		throws Exception
-	{
+	private OutputStream encrypt(final OutputStream out, final List<X509Certificate> recipients) throws Exception {
 		final CMSEnvelopedDataStreamGenerator gen = new CMSEnvelopedDataStreamGenerator();
-		Arrays.stream(recipients).map(RecipientInfoGeneratorFactory::create).forEach(gen::addRecipientInfoGenerator);
+		for (final X509Certificate recipient : recipients) {
+			gen.addRecipientInfoGenerator(RecipientInfoGeneratorFactory.create(recipient));
+		}
 		final OutputEncryptor encryptor =
 			new JceCMSContentEncryptorBuilder(encryptionAlgorithm)
 				.setProvider(PROVIDER_NAME)
 				.build();
 		return gen.open(out, encryptor);
-	}
-
-	private XFunction<OutputStream, OutputStream> encrypt(Callable<X509Certificate>[] recipients) {
-		return Streams.fixOutputstreamClose(out -> encrypt(out, recipients));
 	}
 
   private InputStream decrypt(final InputStream in) throws Exception {
@@ -235,10 +226,35 @@ final class DefaultSubscriber implements Subscriber {
     throw new CertificateMismatchException();
   }
 
-	private final XFunction<InputStream, InputStream> decrypt = Streams.fixInputstreamClose(this::decrypt);
+	private SeconCallable<OutputStream> signAndEncryptTo(
+		final Callable<OutputStream> output,
+		final Callable<List<X509Certificate>> recipients
+	) {
+		return callable(() -> {
+			final List<X509Certificate> certs = recipients.call(); // may throw `CertificateNotFoundException`
+			final OutputStream underlying = output.call();
+			try {
+				final OutputStream encrypting = encrypt(underlying, certs);
+				return new FilterOutputStream(sign(encrypting)) {
 
-	private Socket<OutputStream> signAndEncryptTo(Socket<OutputStream> output, Callable<X509Certificate>[] recipients) {
-		return output.map(sign.compose(encrypt(recipients)));
+					@Override
+					public void write(byte[] b, int off, int len) throws IOException {
+						out.write(b, off, len);
+					}
+
+					@Override
+					public void close() throws IOException {
+						// Bouncy Castle doesn't close the streams it writes to, so close them here, innermost last:
+						try (OutputStream closeUnderlying = underlying; OutputStream closeEncrypting = encrypting) {
+							out.close();
+						}
+					}
+				};
+			} catch (Throwable t) {
+				closeSuppressed(underlying, t);
+				throw t;
+			}
+		});
 	}
 
 	@Override
@@ -247,15 +263,8 @@ final class DefaultSubscriber implements Subscriber {
 		final X509Certificate		 recipient,
 		final X509Certificate...     others
 	) {
-		@SuppressWarnings("unchecked")
-		final Callable<X509Certificate>[] recipients = new Callable[others.length + 1];
-		requireNonNull(recipient);
-		recipients[0] = () -> recipient;
-		for (int i = 0; i < others.length;) {
-			final X509Certificate other = requireNonNull(others[i]);
-			recipients[++i] = () -> other;
-		}
-		return callable(signAndEncryptTo(socket(output), recipients));
+		final List<X509Certificate> recipients = list(recipient, others);
+		return signAndEncryptTo(output, () -> recipients);
 	}
 
 	@Override
@@ -264,24 +273,55 @@ final class DefaultSubscriber implements Subscriber {
 		final String				 recipientId,
 		final String... 			 otherIds
 	) {
-		@SuppressWarnings("unchecked")
-		final Callable<X509Certificate>[] recipients = new Callable[otherIds.length + 1];
-		requireNonNull(recipientId);
-		recipients[0] = () -> certificate(recipientId);
-		for (int i = 0; i < otherIds.length;) {
-			final String other = requireNonNull(otherIds[i]);
-			recipients[++i] = () -> certificate(other);
-		}
-		return callable(signAndEncryptTo(socket(output), recipients));
-	}
-
-	private Socket<InputStream> decryptAndVerifyFrom(Socket<InputStream> input, Verifier v) {
-		return input.map(verify(v).compose(decrypt));
+		final List<String> ids = list(recipientId, otherIds);
+		return signAndEncryptTo(output, () -> {
+			final List<X509Certificate> recipients = new ArrayList<>(ids.size());
+			for (final String id : ids) {
+				recipients.add(certificate(id));
+			}
+			return recipients;
+		});
 	}
 
 	@Override
 	public SeconCallable<InputStream> decryptAndVerifyFrom(Callable<InputStream> input, Verifier v) {
-		return callable(decryptAndVerifyFrom(socket(input), v));
+		return callable(() -> {
+			final InputStream underlying = input.call();
+			try {
+				final InputStream decrypting = decrypt(underlying);
+				return new FilterInputStream(verify(decrypting, v)) {
+
+					@Override
+					public void close() throws IOException {
+						// Bouncy Castle doesn't close the streams it reads from, so close them here, innermost last:
+						try (InputStream closeUnderlying = underlying; InputStream closeDecrypting = decrypting) {
+							in.close();
+						}
+					}
+				};
+			} catch (Throwable t) {
+				closeSuppressed(underlying, t);
+				throw t;
+			}
+		});
+	}
+
+	@SafeVarargs
+	private static <T> List<T> list(final T first, final T... others) {
+		final List<T> list = new ArrayList<>(others.length + 1);
+		list.add(requireNonNull(first));
+		for (final T other : others) {
+			list.add(requireNonNull(other));
+		}
+		return list;
+	}
+
+	private static void closeSuppressed(final Closeable c, final Throwable primary) {
+		try {
+			c.close();
+		} catch (Throwable t) {
+			primary.addSuppressed(t);
+		}
 	}
 }
 

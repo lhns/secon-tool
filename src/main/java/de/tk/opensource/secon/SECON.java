@@ -38,9 +38,6 @@ import javax.naming.directory.InitialDirContext;
 import org.bouncycastle.cms.CMSAlgorithm;
 import org.bouncycastle.jce.provider.BouncyCastleProvider;
 
-import global.namespace.fun.io.api.Socket;
-import global.namespace.fun.io.bios.BIOS;
-
 /**
  * Stellt CMS-Dienste (Cryptographic Message Syntax) für das Krankenkassenkommunikationssystem (SECON) bereit.
  * Diese Fassade ist der Haupteinstiegspunkt von diesem API.
@@ -139,22 +136,16 @@ public final class SECON {
             Callable<char[]> password,
             String type
     ) throws SeconException {
-        return call(() -> keyStore(socket(input), password, type));
-    }
-
-    private static KeyStore keyStore(
-            final Socket<InputStream> input,
-            final Callable<char[]> password,
-            final String type
-    ) throws Exception {
-        final KeyStore ks = KeyStore.getInstance(type);
-        final char[] pwChars = password.call();
-        try {
-            input.accept(in -> ks.load(in, pwChars));
-        } finally {
-            Arrays.fill(pwChars, (char) 0);
-        }
-        return ks;
+        return call(() -> {
+            final KeyStore ks = KeyStore.getInstance(type);
+            final char[] pwChars = password.call();
+            try (InputStream in = input.call()) {
+                ks.load(in, pwChars);
+            } finally {
+                Arrays.fill(pwChars, (char) 0);
+            }
+            return ks;
+        });
     }
 
     /**
@@ -189,7 +180,7 @@ public final class SECON {
      * @param pool Ein Pool von Verbindungen zum LDAP-Server.
      */
     public static Directory directory(Callable<DirContext> pool) {
-        return new LdapDirectory(requireNonNull(pool)::call);
+        return new LdapDirectory(requireNonNull(pool));
     }
 
     /**
@@ -239,24 +230,26 @@ public final class SECON {
 
     /**
      * Kopiert einen erneuerbaren Eingabestrom zu einem erneuerbaren Ausgabestrom.
-     * Um eine optimale Leistung zu erzielen, wird der Eingabestrom nebenläufig im Hintergrund gelesen.
+     * Beide Streams werden anschließend geschlossen.
      */
     public static void copy(Callable<InputStream> input, Callable<OutputStream> output) throws SeconException {
         call(() -> {
-            BIOS.copy(socket(input), socket(output));
+            try (InputStream in = input.call(); OutputStream out = output.call()) {
+                final byte[] buffer = new byte[64 * 1024];
+                for (int read; 0 <= (read = in.read(buffer)); ) {
+                    out.write(buffer, 0, read);
+                }
+                out.flush();
+            }
             return null;
         });
-    }
-
-    static <T extends AutoCloseable> Socket<T> socket(Callable<T> c) {
-        return c::call;
     }
 
     private static <V> V call(Callable<V> c) throws SeconException {
         return callable(c).call();
     }
 
-    private static <V> SeconCallable<V> callable(Callable<V> c) {
+    static <V> SeconCallable<V> callable(Callable<V> c) {
         return () -> {
             try {
                 return c.call();
@@ -277,10 +270,5 @@ public final class SECON {
                 throw (SeconException) t;
             }
         }
-    }
-
-    @SuppressWarnings("deprecation")
-    static <V extends AutoCloseable> SeconCallable<V> callable(Socket<V> s) {
-        return callable((Callable<V>) s::get);
     }
 }

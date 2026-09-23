@@ -1,8 +1,5 @@
 package de.tk.opensource.secon;
 
-import global.namespace.fun.io.api.Sink;
-import global.namespace.fun.io.api.Source;
-import global.namespace.fun.io.api.Store;
 import org.bouncycastle.asn1.x500.X500Name;
 import org.bouncycastle.cert.jcajce.JcaX509CertificateConverter;
 import org.bouncycastle.cert.jcajce.JcaX509CertificateHolder;
@@ -20,8 +17,6 @@ import org.bouncycastle.operator.jcajce.JcaDigestCalculatorProviderBuilder;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
-import java.io.InputStream;
-import java.io.OutputStream;
 import java.math.BigInteger;
 import java.nio.charset.StandardCharsets;
 import java.security.KeyPair;
@@ -33,11 +28,9 @@ import java.security.cert.X509Certificate;
 import java.util.Date;
 import java.util.concurrent.Callable;
 
-import static de.tk.opensource.secon.SECON.callable;
 import static de.tk.opensource.secon.SECON.copy;
 import static de.tk.opensource.secon.SECON.keyStore;
 import static de.tk.opensource.secon.SECON.subscriber;
-import static global.namespace.fun.io.bios.BIOS.memory;
 import static org.junit.jupiter.api.Assertions.*;
 
 public final class IssuerValidationTest {
@@ -56,10 +49,10 @@ public final class IssuerValidationTest {
 
     @Test
     void issuerMustHaveBasicConstraints() throws Exception {
-        Store cipher, clone;
+        MemoryStore cipher, clone;
 
-        cipher = memory();
-        clone = memory();
+        cipher = new MemoryStore();
+        clone = new MemoryStore();
 
         Identity senderId = SECON.identity(keystore, "alice_pss_256", pw);
         Identity recipientId = SECON.identity(keystore, "bob_pss_256", pw);
@@ -72,7 +65,7 @@ public final class IssuerValidationTest {
 
         cipher.content(signedAndEncrypted);
 
-        assertThrows(SeconException.class, () -> copy(recipient.decryptAndVerifyFrom(input(cipher)), output(clone)));
+        assertThrows(SeconException.class, () -> copy(recipient.decryptAndVerifyFrom(cipher.input()), clone.output()));
     }
 
     private static byte[] signedUnderEnrolledLeaf(PrivateKey leafKey, X509Certificate leafCert) throws Exception {
@@ -118,12 +111,6 @@ public final class IssuerValidationTest {
         return kpg.generateKeyPair();
     }
 
-    private static Callable<InputStream> input(Source source) {
-        return callable(source.input());
-    }
 
-    private static Callable<OutputStream> output(Sink sink) {
-        return callable(sink.output());
-    }
 
 }

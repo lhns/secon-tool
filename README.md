@@ -8,7 +8,6 @@ Grundlage ist die Spezifikation vom GKV-SV in der [Anlage - 16 Security Schnitts
 
 + [Cryptographic Message Syntax (CMS)](https://tools.ietf.org/html/rfc5652)
 + [BouncyCastle](https://bouncycastle.org/)
-+ [Fun I/O](https://christian-schlichtherle.github.io/fun-io/)
 
 ## Übersicht
 

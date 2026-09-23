@@ -16,7 +16,6 @@
  */
 package de.tk.opensource.secon;
 
-import global.namespace.fun.io.api.function.XFunction;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import reactor.core.publisher.Flux;
@@ -114,7 +113,13 @@ public class LdapConnectionTest {
         return String.format(ENGLISH, "58%07d", ThreadLocalRandom.current().nextInt(10_000_000));
     }
 
-    private static <T, R> Function<T, Mono<R>> unchecked(XFunction<T, R> f) {
+    private static <T, R> Function<T, Mono<R>> unchecked(ThrowingFunction<T, R> f) {
         return t -> Mono.fromCallable(() -> f.apply(t));
+    }
+
+    @FunctionalInterface
+    private interface ThrowingFunction<T, R> {
+
+        R apply(T t) throws Exception;
     }
 }

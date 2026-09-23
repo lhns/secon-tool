@@ -29,7 +29,6 @@ application {
 dependencies {
     val junitVersion = "5.6.2"
 
-    implementation("global.namespace.fun-io:fun-io-bios:2.4.0")
     implementation("org.bouncycastle:bcpkix-jdk18on:1.78.1")
 
     testImplementation(platform("io.projectreactor:reactor-bom:2020.0.2"))

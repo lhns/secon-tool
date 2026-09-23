@@ -50,7 +50,7 @@ class KeyEncryptionTest {
 
 		RecipientInfo info =
 			RecipientInfoGeneratorFactory
-				.create(() -> { return (X509Certificate) ks.getCertificate("alice_pss_256"); })
+				.create((X509Certificate) ks.getCertificate("alice_pss_256"))
 				.generate(generateRandomAESKey());
 
 		assertKeyEncryption_RSAES_OAEP((KeyTransRecipientInfo) info.getInfo());
@@ -62,7 +62,7 @@ class KeyEncryptionTest {
 
 		RecipientInfo info =
 			RecipientInfoGeneratorFactory
-				.create(() -> { return (X509Certificate) ks.getCertificate("alice_rsa_256"); })
+				.create((X509Certificate) ks.getCertificate("alice_rsa_256"))
 				.generate(generateRandomAESKey());
 
 		assertKeyEncryption_RSA((KeyTransRecipientInfo) info.getInfo());

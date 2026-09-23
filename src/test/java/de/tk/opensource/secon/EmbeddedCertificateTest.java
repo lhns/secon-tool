@@ -20,19 +20,15 @@
  */
 package de.tk.opensource.secon;
 
-import static de.tk.opensource.secon.SECON.callable;
 import static de.tk.opensource.secon.SECON.copy;
 import static de.tk.opensource.secon.SECON.directory;
 import static de.tk.opensource.secon.SECON.identity;
 import static de.tk.opensource.secon.SECON.keyStore;
 import static de.tk.opensource.secon.SECON.subscriber;
-import static global.namespace.fun.io.bios.BIOS.memory;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import java.io.IOException;
-import java.io.InputStream;
-import java.io.OutputStream;
 import java.security.KeyStore;
 import java.security.KeyStoreException;
 import java.security.NoSuchAlgorithmException;
@@ -45,9 +41,6 @@ import java.util.concurrent.Callable;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
-import global.namespace.fun.io.api.Sink;
-import global.namespace.fun.io.api.Source;
-import global.namespace.fun.io.api.Store;
 
 /**
  * @author Wolfgang Schmiesing
@@ -64,13 +57,13 @@ public class EmbeddedCertificateTest {
 
 	private X509Certificate recipientCert;
 	
-	private Store plain, cipher, clone;	
+	private MemoryStore plain, cipher, clone;	
 
 	@BeforeEach
 	void setup() throws Exception {
-		plain = memory(); 
-		cipher = memory(); 
-		clone = memory();
+		plain = new MemoryStore(); 
+		cipher = new MemoryStore(); 
+		clone = new MemoryStore();
 		
 		// input message
 		plain.content("Hello world!".getBytes());
@@ -86,8 +79,8 @@ public class EmbeddedCertificateTest {
 		createRecipient(directory(keystore));
 		
 		// send -> receive
-		copy(input(plain), sender.signAndEncryptTo(output(cipher), recipientCert));
-		copy(recipient.decryptAndVerifyFrom(input(cipher)), output(clone));
+		copy(plain.input(), sender.signAndEncryptTo(cipher.output(), recipientCert));
+		copy(recipient.decryptAndVerifyFrom(cipher.input()), clone.output());
 		
 		assertArrayEquals(plain.content(), clone.content());
 	}
@@ -100,8 +93,8 @@ public class EmbeddedCertificateTest {
 		createRecipient(directory(keystore(id.certificate())));
 		
 		// send -> receive
-		copy(input(plain), sender.signAndEncryptTo(output(cipher), recipientCert));
-        copy(recipient.decryptAndVerifyFrom(input(cipher)), output(clone));
+		copy(plain.input(), sender.signAndEncryptTo(cipher.output(), recipientCert));
+        copy(recipient.decryptAndVerifyFrom(cipher.input()), clone.output());
 		
 		assertArrayEquals(plain.content(), clone.content());
 	}
@@ -115,8 +108,8 @@ public class EmbeddedCertificateTest {
 		createRecipient(directory(keystore(senderId.getRootCert())));
 		
 		// send -> receive
-		copy(input(plain), sender.signAndEncryptTo(output(cipher), recipientCert));
-        copy(recipient.decryptAndVerifyFrom(input(cipher)), output(clone));
+		copy(plain.input(), sender.signAndEncryptTo(cipher.output(), recipientCert));
+        copy(recipient.decryptAndVerifyFrom(cipher.input()), clone.output());
 		
 		assertArrayEquals(plain.content(), clone.content());
 	}
@@ -129,8 +122,8 @@ public class EmbeddedCertificateTest {
 		createRecipient(new EmptyDirectory());
 
 		// send -> receive
-		copy(input(plain), sender.signAndEncryptTo(output(cipher), recipientCert));
-        assertThrows(CertificateNotFoundException.class, () -> copy(recipient.decryptAndVerifyFrom(input(cipher)), output(clone)));
+		copy(plain.input(), sender.signAndEncryptTo(cipher.output(), recipientCert));
+        assertThrows(CertificateNotFoundException.class, () -> copy(recipient.decryptAndVerifyFrom(cipher.input()), clone.output()));
 		
 		assertArrayEquals(plain.content(), clone.content());
 	}
@@ -145,21 +138,15 @@ public class EmbeddedCertificateTest {
 		
 
 		// send -> receive
-		copy(input(plain), sender.signAndEncryptTo(output(cipher), recipientCert));
-        assertThrows(CertificateNotFoundException.class, () -> copy(recipient.decryptAndVerifyFrom(input(cipher)), output(clone)));
+		copy(plain.input(), sender.signAndEncryptTo(cipher.output(), recipientCert));
+        assertThrows(CertificateNotFoundException.class, () -> copy(recipient.decryptAndVerifyFrom(cipher.input()), clone.output()));
 		
 		assertArrayEquals(plain.content(), clone.content());
 	}
 
 
 
-	private static Callable<InputStream> input(Source source) {
-		return callable(source.input());
-	}
 
-	private static Callable<OutputStream> output(Sink sink) {
-		return callable(sink.output());
-	}
 	
 
 	private void createRecipient(Directory directory) throws Exception {

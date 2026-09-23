@@ -20,36 +20,43 @@
  */
 package de.tk.opensource.secon;
 
-import global.namespace.fun.io.api.function.XFunction;
-
-import java.io.*;
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
+import java.io.FileNotFoundException;
+import java.io.InputStream;
+import java.io.OutputStream;
+import java.util.concurrent.Callable;
 
 /**
- * @author Christian Schlichtherle
+ * Ein einfacher Speicher im Arbeitsspeicher für Tests.
+ * Der Inhalt wird beim Schließen des OutputStreams übernommen.
  */
-final class Streams {
+final class MemoryStore {
 
-    private Streams() {
+    private volatile byte[] content;
+
+    byte[] content() throws FileNotFoundException {
+        final byte[] c = content;
+        if (null == c) {
+            throw new FileNotFoundException("no content");
+        }
+        return c.clone();
     }
 
-    static XFunction<InputStream, InputStream> fixInputstreamClose(
-            XFunction<InputStream, InputStream> brokenFilter) {
-        return underlying -> new FilterInputStream(brokenFilter.apply(underlying)) {
-
-            @Override
-            public void close() throws IOException {
-                SideEffect.runAll(in::close, underlying::close);
-            }
-        };
+    void content(byte[] content) {
+        this.content = content.clone();
     }
 
-    static XFunction<OutputStream, OutputStream> fixOutputstreamClose(
-            XFunction<OutputStream, OutputStream> brokenFilter) {
-        return underlying -> new FilterOutputStream(brokenFilter.apply(underlying)) {
+    Callable<InputStream> input() {
+        return () -> new ByteArrayInputStream(content());
+    }
+
+    Callable<OutputStream> output() {
+        return () -> new ByteArrayOutputStream() {
 
             @Override
-            public void close() throws IOException {
-                SideEffect.runAll(out::close, underlying::close);
+            public void close() {
+                content = toByteArray();
             }
         };
     }

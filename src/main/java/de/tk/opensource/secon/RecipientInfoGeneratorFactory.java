@@ -20,6 +20,7 @@
  */
 package de.tk.opensource.secon;
 
+import java.security.GeneralSecurityException;
 import java.security.InvalidKeyException;
 import java.security.cert.X509Certificate;
 import java.security.interfaces.RSAKey;
@@ -37,20 +38,27 @@ import static org.bouncycastle.jce.provider.BouncyCastleProvider.*;
  */
 public final class RecipientInfoGeneratorFactory {
 
+	public static RecipientInfoGenerator create(X509Certificate cert) throws GeneralSecurityException {
+		if (keySize(cert) < 4096) {
+
+			// für Schlüssel kleiner 4096 Bit den Algorithmus des öffentlichen Schlüssels verwenden (RSA)
+			return new JceKeyTransRecipientInfoGenerator(cert).setProvider(PROVIDER_NAME);
+		} else {
+
+			// für Schlüssel >= 4096 RSAES_OAEP verwenden
+			return
+				new JceKeyTransRecipientInfoGenerator(cert, KksAlgorithms.ENCRYPTION_ALGORITHM_RSAES_OAEP)
+					.setProvider(PROVIDER_NAME);
+		}
+	}
+
+	/**
+	 * @deprecated Verwende {@link #create(X509Certificate)}.
+	 */
+	@Deprecated
 	public static RecipientInfoGenerator create(Callable<X509Certificate> certCallable) {
 		try {
-			X509Certificate cert = certCallable.call();
-			if (keySize(cert) < 4096) {
-
-				// für Schlüssel kleiner 4096 Bit den Algorithmus des öffentlichen Schlüssels verwenden (RSA)
-				return new JceKeyTransRecipientInfoGenerator(cert).setProvider(PROVIDER_NAME);
-			} else {
-
-				// für Schlüssel >= 4096 RSAES_OAEP verwenden
-				return
-					new JceKeyTransRecipientInfoGenerator(cert, KksAlgorithms.ENCRYPTION_ALGORITHM_RSAES_OAEP)
-						.setProvider(PROVIDER_NAME);
-			}
+			return create(certCallable.call());
 		} catch (Exception e) {
 			throw new RuntimeException(e);
 		}

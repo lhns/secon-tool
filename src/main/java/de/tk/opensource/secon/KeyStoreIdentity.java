@@ -28,7 +28,6 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.Optional;
 import java.util.concurrent.Callable;
-import java.util.stream.Stream;
 
 /**
  * @author Wolfgang Schmiesing
@@ -67,17 +66,7 @@ final class KeyStoreIdentity implements Identity {
 
     @Override
     public final Optional<PrivateKey> privateKey(X509CertSelector selector) throws Exception {
-        return Collections
-                .list(ks.aliases())
-                .stream()
-                .flatMap(this::privateKeyEntryStream)
-                .filter(entry -> selector.match(entry.getCertificate()))
-                .map(KeyStore.PrivateKeyEntry::getPrivateKey)
-                .findFirst();
-    }
-
-    private Stream<KeyStore.PrivateKeyEntry> privateKeyEntryStream(final String alias) {
-        try {
+        for (final String alias : Collections.list(ks.aliases())) {
             if (ks.isKeyEntry(alias)) {
                 final KeyStore.Entry entry;
                 final char[] pw = password.call();
@@ -86,13 +75,12 @@ final class KeyStoreIdentity implements Identity {
                 } finally {
                     Arrays.fill(pw, (char) 0);
                 }
-                if (entry instanceof KeyStore.PrivateKeyEntry) {
-                    return Stream.of((KeyStore.PrivateKeyEntry) entry);
+                if (entry instanceof KeyStore.PrivateKeyEntry
+                        && selector.match(((KeyStore.PrivateKeyEntry) entry).getCertificate())) {
+                    return Optional.of(((KeyStore.PrivateKeyEntry) entry).getPrivateKey());
                 }
             }
-            return Stream.empty();
-        } catch (Exception e) {
-            throw new IllegalStateException("Cannot get keystore entry with alias `" + alias + "`:", e);
         }
+        return Optional.empty();
     }
 }
